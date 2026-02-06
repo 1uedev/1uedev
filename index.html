@@ -42,7 +42,12 @@ html,body{
   position:absolute;
   will-change:transform,opacity;
   transform:translateZ(0);
-  pointer-events:none;
+  pointer-events:auto;
+  cursor:pointer;
+  transition:filter .15s;
+}
+.shape.scared{
+  filter:brightness(1.8) drop-shadow(0 0 18px currentColor);
 }
 .shape svg{
   width:100%;
@@ -859,18 +864,48 @@ for (let i = 0; i < CREATURE_COUNT; i++) {
   shapes.push(s);
 }
 
+// click / tap detection – listener on document, match against shapes
+document.addEventListener('click', e => {
+  const shapeEl = e.target.closest('.shape');
+  if (!shapeEl) return;
+  const s = shapes.find(s => s.el === shapeEl);
+  if (s) scareCreature(s);
+});
+
+function scareCreature(s) {
+  if (s.scared) return;
+  s.scared = true;
+  s.scaredTime = performance.now();
+  s.scareScale = 1.5;
+  s.scareDir = (Math.random() < .5 ? -1 : 1) * rand(2, 5); // vertical scatter
+  s.el.classList.add('scared');
+  // after brief freeze, bolt away
+  setTimeout(() => {
+    s.speed = rand(8, 14);
+    s.scareScale = 1;
+  }, 180);
+}
+
 function updateShapes(t) {
   shapes.forEach(s => {
+    // scared vertical drift
+    if (s.scared) {
+      s.yBase += s.scareDir;
+      s.scareDir *= .97; // dampen vertical scatter
+    }
+
     s.x += s.speed;
-    if (s.x > W() + s.w) {
+    if (s.x > W() + s.w || s.x < -s.w * 2) {
+      s.scared = false;
+      s.el.classList.remove('scared');
       initShape(s, false);
       return;
     }
-    const yOff = Math.sin(t * s.sinFreq + s.born) * s.sinAmp;
-    const pulse = 1 + Math.sin(t * s.pulseSpeed) * .06;
+    const yOff = s.scared ? 0 : Math.sin(t * s.sinFreq + s.born) * s.sinAmp;
+    const scale = s.scared ? s.scareScale : 1 + Math.sin(t * s.pulseSpeed) * .06;
     const y = s.yBase + yOff;
-    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) scale(${pulse})`;
-    s.el.style.opacity = s.opacity;
+    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) scale(${scale})`;
+    s.el.style.opacity = s.scared ? 1 : s.opacity;
   });
 }
 

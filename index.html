@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1ü.dev – überwältigend anders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  font-family:'Space Grotesk',system-ui,sans-serif;
+  background:#0a0012;
+}
+#scene{
+  position:fixed;inset:0;
+  width:100vw;height:100vh;
+  overflow:hidden;
+  z-index:0;
+}
+
+/* ── gradient canvas ── */
+#gradient-canvas{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  z-index:0;
+  filter:blur(60px) saturate(1.6);
+  will-change:transform;
+  transform:translateZ(0) scale(1.15);
+}
+
+/* ── floating creatures layer ── */
+#shapes-layer{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  z-index:1;
+  pointer-events:none;
+}
+.shape{
+  position:absolute;
+  will-change:transform,opacity;
+  transform:translateZ(0);
+  pointer-events:none;
+}
+.shape svg{
+  width:100%;
+  height:100%;
+  overflow:visible;
+  filter:drop-shadow(0 0 8px currentColor);
+}
+
+/* ── floating words layer ── */
+#words-layer{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  z-index:2;
+  pointer-events:none;
+}
+.floating-word{
+  position:absolute;
+  font-family:'Space Grotesk',system-ui,sans-serif;
+  font-weight:700;
+  color:#fff;
+  opacity:0;
+  will-change:transform,opacity;
+  transform:translateZ(0);
+  pointer-events:none;
+  text-shadow:
+    0 0 20px rgba(200,100,255,.6),
+    0 0 40px rgba(200,100,255,.3);
+  animation:wordLife 4.5s ease-in-out forwards;
+}
+@keyframes wordLife{
+  0%  {opacity:0;transform:translateY(12px) scale(.92) translateZ(0)}
+  15% {opacity:.85;transform:translateY(0) scale(1) translateZ(0)}
+  75% {opacity:.85;transform:translateY(-4px) scale(1) translateZ(0)}
+  100%{opacity:0;transform:translateY(-16px) scale(.95) translateZ(0)}
+}
+
+/* ── centre content ── */
+#centre{
+  position:fixed;inset:0;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  z-index:10;
+  pointer-events:none;
+  user-select:none;
+}
+#title{
+  font-size:clamp(4rem,14vw,12rem);
+  font-weight:700;
+  letter-spacing:-.03em;
+  line-height:1;
+  background:linear-gradient(
+    135deg,
+    #ff2daa 0%,#c840ff 25%,#40a0ff 50%,#2dffb0 75%,#ffe040 100%
+  );
+  background-size:300% 300%;
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:titleGradient 6s ease infinite;
+  filter:drop-shadow(0 0 30px rgba(200,64,255,.45))
+         drop-shadow(0 0 60px rgba(64,160,255,.25));
+}
+@keyframes titleGradient{
+  0%,100%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+}
+#tagline{
+  margin-top:clamp(.5rem,2vw,1.5rem);
+  font-size:clamp(1rem,2.5vw,1.8rem);
+  font-weight:400;
+  letter-spacing:.08em;
+  color:rgba(255,255,255,.65);
+  text-shadow:0 0 18px rgba(200,100,255,.35);
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+  padding:.35em .9em;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.08);
+  background:rgba(255,255,255,.04);
+}
+
+/* ── subtle pulse on centre ── */
+#centre{
+  animation:breathe 5s ease-in-out infinite;
+}
+@keyframes breathe{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.018)}
+}
+
+/* ── ripple cursor ── */
+.ripple{
+  position:fixed;
+  border-radius:50%;
+  pointer-events:none;
+  z-index:3;
+  border:1.5px solid rgba(255,255,255,.25);
+  animation:rippleOut .9s ease-out forwards;
+  will-change:transform,opacity;
+  transform:translateZ(0);
+}
+@keyframes rippleOut{
+  0%{transform:scale(0) translateZ(0);opacity:.7}
+  100%{transform:scale(1) translateZ(0);opacity:0}
+}
+</style>
+</head>
+<body>
+
+<div id="scene">
+  <canvas id="gradient-canvas"></canvas>
+  <div id="shapes-layer"></div>
+  <div id="words-layer"></div>
+</div>
+
+<div id="centre">
+  <div id="title">1ü.dev</div>
+  <div id="tagline">überwältigend anders</div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+/* ════════════════════════════════════════════
+   0. Helpers
+   ════════════════════════════════════════════ */
+const lerp = (a,b,t) => a + (b - a) * t;
+const rand = (lo,hi) => Math.random() * (hi - lo) + lo;
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+const W = () => window.innerWidth;
+const H = () => window.innerHeight;
+let uid = 0;
+
+/* ════════════════════════════════════════════
+   1. Animated gradient background (Canvas)
+   ════════════════════════════════════════════ */
+const cvs = document.getElementById('gradient-canvas');
+const ctx = cvs.getContext('2d');
+let dpr = Math.min(window.devicePixelRatio || 1, 2);
+let mouseX = W() * .5, mouseY = H() * .5;
+let targetX = mouseX, targetY = mouseY;
+let hueShift = 0;
+
+function sizeCanvas() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const scale = .35;
+  cvs.width  = Math.round(W() * scale);
+  cvs.height = Math.round(H() * scale);
+}
+sizeCanvas();
+window.addEventListener('resize', () => { sizeCanvas(); });
+
+const gradBlobs = [
+  { hBase:280, s:90, l:50 },
+  { hBase:210, s:100,l:55 },
+  { hBase:330, s:100,l:55 },
+  { hBase:100, s:95, l:50 },
+  { hBase:25,  s:100,l:55 },
+];
+
+function drawGradient(t) {
+  const w = cvs.width, h = cvs.height;
+  ctx.clearRect(0,0,w,h);
+  const mx = (mouseX / W()) * w;
+  const my = (mouseY / H()) * h;
+  gradBlobs.forEach((b, i) => {
+    const angle = t * .0003 + i * (Math.PI * 2 / gradBlobs.length);
+    const radius = Math.min(w,h) * .38;
+    const cx = mx + Math.cos(angle) * radius * .6;
+    const cy = my + Math.sin(angle) * radius * .6;
+    const r  = Math.min(w,h) * rand(.35,.55);
+    const hue = (b.hBase + hueShift) % 360;
+    const grad = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    grad.addColorStop(0, `hsla(${hue},${b.s}%,${b.l}%,.75)`);
+    grad.addColorStop(1, `hsla(${hue},${b.s}%,${b.l}%,0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0,0,w,h);
+  });
+}
+
+/* ════════════════════════════════════════════
+   2. Animated creature SVGs
+   ════════════════════════════════════════════ */
+
+const neonPalette = [
+  ['#c840ff','#9b30ff'],  // violet
+  ['#40a0ff','#2080e0'],  // blue
+  ['#ff2daa','#e0208a'],  // pink
+  ['#2dffb0','#20d090'],  // green
+  ['#ff8030','#e06020'],  // orange
+  ['#ffe040','#e0c020'],  // yellow
+  ['#ff4060','#d02040'],  // red
+  ['#40ffe0','#20d0c0'],  // cyan
+];
+
+function neonColor() { return pick(neonPalette); }
+
+/* Each creator returns an SVG string. SMIL <animate> / <animateTransform>
+   keeps body-part animation entirely inside the SVG – zero JS overhead. */
+
+function svgTropicalFish(c) {
+  const id = 'f' + (++uid);
+  return `<svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <ellipse cx="55" cy="40" rx="32" ry="20" fill="url(#${id}g)" opacity=".85"/>
+  <!-- stripes -->
+  <line x1="48" y1="22" x2="48" y2="58" stroke="${c[1]}" stroke-width="2.5" opacity=".4"/>
+  <line x1="60" y1="22" x2="60" y2="58" stroke="${c[1]}" stroke-width="2" opacity=".3"/>
+  <!-- tail -->
+  <polygon points="23,40 5,18 5,62" fill="${c[0]}" opacity=".75">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-8 23 40;8 23 40;-8 23 40" dur="0.6s" repeatCount="indefinite"/>
+  </polygon>
+  <!-- dorsal fin -->
+  <path d="M50,20 Q58,4 68,20" fill="${c[1]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-5 58 20;5 58 20;-5 58 20" dur="0.8s" repeatCount="indefinite"/>
+  </path>
+  <!-- eye -->
+  <circle cx="72" cy="36" r="5" fill="#fff" opacity=".9"/>
+  <circle cx="74" cy="36" r="2.5" fill="#111"/>
+  <!-- pectoral fin -->
+  <ellipse cx="55" cy="52" rx="10" ry="5" fill="${c[0]}" opacity=".5">
+    <animateTransform attributeName="transform" type="rotate"
+      values="10 55 52;-10 55 52;10 55 52" dur="0.7s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>`;
+}
+
+function svgAngelfish(c) {
+  const id = 'a' + (++uid);
+  return `<svg viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- tall body -->
+  <ellipse cx="50" cy="55" rx="22" ry="38" fill="url(#${id}g)" opacity=".8"/>
+  <!-- top fin -->
+  <path d="M50,17 Q40,2 30,17" fill="${c[1]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-4 50 17;4 50 17;-4 50 17" dur="1s" repeatCount="indefinite"/>
+  </path>
+  <!-- bottom fin -->
+  <path d="M50,93 Q40,110 30,93" fill="${c[1]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="4 50 93;-4 50 93;4 50 93" dur="1s" repeatCount="indefinite"/>
+  </path>
+  <!-- tail -->
+  <polygon points="28,55 10,38 10,72" fill="${c[0]}" opacity=".7">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-6 28 55;6 28 55;-6 28 55" dur="0.5s" repeatCount="indefinite"/>
+  </polygon>
+  <!-- stripes -->
+  <line x1="42" y1="20" x2="42" y2="90" stroke="${c[1]}" stroke-width="2" opacity=".3"/>
+  <line x1="54" y1="20" x2="54" y2="90" stroke="${c[1]}" stroke-width="2" opacity=".25"/>
+  <!-- eye -->
+  <circle cx="60" cy="48" r="4.5" fill="#fff" opacity=".9"/>
+  <circle cx="62" cy="48" r="2.2" fill="#111"/>
+</svg>`;
+}
+
+function svgPufferfish(c) {
+  const id = 'p' + (++uid);
+  return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="${id}g">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </radialGradient></defs>
+  <!-- round body pulsing -->
+  <circle cx="50" cy="50" r="28" fill="url(#${id}g)" opacity=".8">
+    <animate attributeName="r" values="28;31;28" dur="1.2s" repeatCount="indefinite"/>
+  </circle>
+  <!-- spines -->
+  ${[0,40,80,120,160,200,240,280,320].map(a => {
+    const rad = a * Math.PI / 180;
+    const x1 = 50 + Math.cos(rad)*28, y1 = 50 + Math.sin(rad)*28;
+    const x2 = 50 + Math.cos(rad)*36, y2 = 50 + Math.sin(rad)*36;
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c[0]}" stroke-width="1.5" opacity=".5">
+      <animate attributeName="x2" values="${x2};${50+Math.cos(rad)*39};${x2}" dur="1.2s" repeatCount="indefinite"/>
+      <animate attributeName="y2" values="${y2};${50+Math.sin(rad)*39};${y2}" dur="1.2s" repeatCount="indefinite"/>
+    </line>`;
+  }).join('')}
+  <!-- tail -->
+  <polygon points="22,50 8,40 8,60" fill="${c[0]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-5 22 50;5 22 50;-5 22 50" dur="0.5s" repeatCount="indefinite"/>
+  </polygon>
+  <!-- eye -->
+  <circle cx="60" cy="43" r="5" fill="#fff" opacity=".9"/>
+  <circle cx="62" cy="43" r="2.5" fill="#111"/>
+  <!-- mouth -->
+  <ellipse cx="70" cy="52" rx="2.5" ry="3" fill="${c[1]}" opacity=".5">
+    <animate attributeName="ry" values="3;1.5;3" dur="1.5s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>`;
+}
+
+function svgJellyfish(c) {
+  const id = 'j' + (++uid);
+  return `<svg viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="${id}g">
+    <stop offset="0%" stop-color="${c[0]}" stop-opacity=".6"/>
+    <stop offset="100%" stop-color="${c[1]}" stop-opacity=".25"/>
+  </radialGradient></defs>
+  <!-- dome -->
+  <path d="M15,55 Q15,10 50,10 Q85,10 85,55 Z" fill="url(#${id}g)">
+    <animate attributeName="d"
+      values="M15,55 Q15,10 50,10 Q85,10 85,55 Z;M18,55 Q18,14 50,14 Q82,14 82,55 Z;M15,55 Q15,10 50,10 Q85,10 85,55 Z"
+      dur="2s" repeatCount="indefinite"/>
+  </path>
+  <!-- tentacles -->
+  ${[25,38,50,62,75].map((x,i) => {
+    const phase = i * 0.3;
+    return `<path d="M${x},55 Q${x-6},80 ${x+3},105 Q${x+8},115 ${x-2},128" fill="none"
+      stroke="${c[0]}" stroke-width="2" opacity=".5" stroke-linecap="round">
+      <animate attributeName="d"
+        values="M${x},55 Q${x-6},80 ${x+3},105 Q${x+8},115 ${x-2},128;M${x},55 Q${x+6},82 ${x-4},106 Q${x-9},118 ${x+3},128;M${x},55 Q${x-6},80 ${x+3},105 Q${x+8},115 ${x-2},128"
+        dur="${1.5 + phase}s" repeatCount="indefinite"/>
+    </path>`;
+  }).join('')}
+  <!-- inner glow -->
+  <ellipse cx="50" cy="35" rx="18" ry="12" fill="${c[0]}" opacity=".15">
+    <animate attributeName="opacity" values=".15;.3;.15" dur="2s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>`;
+}
+
+function svgOctopus(c) {
+  const id = 'o' + (++uid);
+  return `<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="${id}g">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </radialGradient></defs>
+  <!-- head -->
+  <ellipse cx="60" cy="38" rx="28" ry="25" fill="url(#${id}g)" opacity=".8"/>
+  <!-- eyes -->
+  <circle cx="50" cy="35" r="5" fill="#fff" opacity=".9"/>
+  <circle cx="51.5" cy="35" r="2.5" fill="#111"/>
+  <circle cx="70" cy="35" r="5" fill="#fff" opacity=".9"/>
+  <circle cx="71.5" cy="35" r="2.5" fill="#111"/>
+  <!-- 8 tentacles -->
+  ${[0,1,2,3,4,5,6,7].map(i => {
+    const startX = 38 + i * 6.5;
+    const phase = i * 0.25;
+    const dir = i % 2 === 0 ? 1 : -1;
+    const endX = startX + dir * 12;
+    const cp1x = startX + dir * 8;
+    const cp2x = startX - dir * 5;
+    return `<path d="M${startX},58 Q${cp1x},80 ${cp2x},95 Q${endX},108 ${startX + dir*6},115"
+      fill="none" stroke="${c[0]}" stroke-width="3" opacity=".55" stroke-linecap="round">
+      <animate attributeName="d"
+        values="M${startX},58 Q${cp1x},80 ${cp2x},95 Q${endX},108 ${startX+dir*6},115;M${startX},58 Q${cp1x-dir*10},82 ${cp2x+dir*8},96 Q${endX-dir*8},110 ${startX-dir*4},115;M${startX},58 Q${cp1x},80 ${cp2x},95 Q${endX},108 ${startX+dir*6},115"
+        dur="${1.8 + phase}s" repeatCount="indefinite"/>
+    </path>`;
+  }).join('')}
+</svg>`;
+}
+
+function svgSeahorse(c) {
+  const id = 'sh' + (++uid);
+  return `<svg viewBox="0 0 70 130" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- body curve -->
+  <path d="M35,12 Q50,12 48,30 Q46,50 38,60 Q30,72 35,85 Q40,100 30,115 Q25,125 20,120"
+    fill="none" stroke="url(#${id}g)" stroke-width="10" stroke-linecap="round" opacity=".8">
+    <animate attributeName="d"
+      values="M35,12 Q50,12 48,30 Q46,50 38,60 Q30,72 35,85 Q40,100 30,115 Q25,125 20,120;M35,12 Q52,14 49,32 Q44,52 36,62 Q28,74 33,87 Q38,102 28,116 Q23,124 18,118;M35,12 Q50,12 48,30 Q46,50 38,60 Q30,72 35,85 Q40,100 30,115 Q25,125 20,120"
+      dur="2.5s" repeatCount="indefinite"/>
+  </path>
+  <!-- snout -->
+  <path d="M48,28 L62,24 L60,30" fill="${c[0]}" opacity=".7"/>
+  <!-- eye -->
+  <circle cx="44" cy="22" r="3.5" fill="#fff" opacity=".9"/>
+  <circle cx="45.5" cy="22" r="1.8" fill="#111"/>
+  <!-- crown -->
+  <path d="M30,12 L33,2 L36,10 L40,4 L42,14" fill="${c[1]}" opacity=".5"/>
+  <!-- dorsal fin -->
+  <path d="M32,50 Q22,55 30,65" fill="${c[0]}" opacity=".4">
+    <animate attributeName="d"
+      values="M32,50 Q22,55 30,65;M32,50 Q18,56 30,65;M32,50 Q22,55 30,65"
+      dur="0.8s" repeatCount="indefinite"/>
+  </path>
+</svg>`;
+}
+
+function svgBird(c) {
+  const id = 'b' + (++uid);
+  return `<svg viewBox="0 0 120 80" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="${c[1]}"/><stop offset="100%" stop-color="${c[0]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <ellipse cx="60" cy="42" rx="24" ry="14" fill="url(#${id}g)" opacity=".8"/>
+  <!-- head -->
+  <circle cx="88" cy="34" r="10" fill="${c[0]}" opacity=".85"/>
+  <!-- beak -->
+  <polygon points="98,33 112,36 98,38" fill="#ffe040" opacity=".9"/>
+  <!-- eye -->
+  <circle cx="92" cy="32" r="2.5" fill="#fff"/>
+  <circle cx="93" cy="32" r="1.3" fill="#111"/>
+  <!-- tail feathers -->
+  <polygon points="36,38 14,28 18,42" fill="${c[1]}" opacity=".6"/>
+  <polygon points="36,46 14,52 18,42" fill="${c[0]}" opacity=".5"/>
+  <!-- top wing -->
+  <path d="M50,30 Q45,4 70,14 Q80,18 72,30" fill="${c[0]}" opacity=".7">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 60 38;-28 60 38;0 60 38" dur="0.35s" repeatCount="indefinite"/>
+  </path>
+  <!-- bottom wing hint -->
+  <path d="M50,52 Q48,68 65,62 Q75,58 68,50" fill="${c[1]}" opacity=".45">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 60 46;20 60 46;0 60 46" dur="0.35s" repeatCount="indefinite"/>
+  </path>
+</svg>`;
+}
+
+function svgHummingbird(c) {
+  const id = 'hb' + (++uid);
+  return `<svg viewBox="0 0 110 70" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="${c[1]}"/><stop offset="100%" stop-color="${c[0]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <ellipse cx="50" cy="36" rx="18" ry="10" fill="url(#${id}g)" opacity=".85"/>
+  <!-- head -->
+  <circle cx="72" cy="30" r="8" fill="${c[0]}" opacity=".9"/>
+  <!-- long beak -->
+  <line x1="80" y1="30" x2="108" y2="28" stroke="${c[1]}" stroke-width="2.5" stroke-linecap="round" opacity=".8"/>
+  <!-- eye -->
+  <circle cx="75" cy="28" r="2" fill="#fff"/>
+  <circle cx="75.8" cy="28" r="1" fill="#111"/>
+  <!-- tail -->
+  <polygon points="32,36 12,26 14,38 12,48" fill="${c[1]}" opacity=".55"/>
+  <!-- wing (very fast flap) -->
+  <path d="M46,28 Q38,6 60,16" fill="${c[0]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 50 34;-40 50 34;0 50 34" dur="0.12s" repeatCount="indefinite"/>
+  </path>
+  <path d="M46,42 Q38,62 60,52" fill="${c[1]}" opacity=".4">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 50 38;30 50 38;0 50 38" dur="0.12s" repeatCount="indefinite"/>
+  </path>
+</svg>`;
+}
+
+function svgFlamingo(c) {
+  const id = 'fl' + (++uid);
+  return `<svg viewBox="0 0 90 140" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <ellipse cx="45" cy="55" rx="20" ry="16" fill="url(#${id}g)" opacity=".8"/>
+  <!-- neck -->
+  <path d="M58,42 Q72,25 65,10" fill="none" stroke="${c[0]}" stroke-width="5" stroke-linecap="round" opacity=".8">
+    <animate attributeName="d"
+      values="M58,42 Q72,25 65,10;M58,42 Q74,28 67,12;M58,42 Q72,25 65,10"
+      dur="2s" repeatCount="indefinite"/>
+  </path>
+  <!-- head -->
+  <circle cx="65" cy="10" r="6" fill="${c[0]}" opacity=".9">
+    <animate attributeName="cx" values="65;67;65" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="10;12;10" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <!-- beak -->
+  <path d="M71,10 L82,8 L78,13" fill="#333" opacity=".7">
+    <animate attributeName="d"
+      values="M71,10 L82,8 L78,13;M73,12 L84,10 L80,15;M71,10 L82,8 L78,13"
+      dur="2s" repeatCount="indefinite"/>
+  </path>
+  <!-- eye -->
+  <circle cx="67" cy="9" r="1.5" fill="#fff">
+    <animate attributeName="cx" values="67;69;67" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="cy" values="9;11;9" dur="2s" repeatCount="indefinite"/>
+  </circle>
+  <!-- legs -->
+  <line x1="40" y1="70" x2="38" y2="130" stroke="${c[1]}" stroke-width="2.5" opacity=".6"/>
+  <line x1="52" y1="70" x2="54" y2="128" stroke="${c[1]}" stroke-width="2.5" opacity=".6"/>
+  <!-- wing -->
+  <path d="M30,50 Q20,35 35,42" fill="${c[1]}" opacity=".5">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 45 50;-8 45 50;0 45 50" dur="1.5s" repeatCount="indefinite"/>
+  </path>
+  <!-- tail -->
+  <path d="M25,58 Q10,52 15,65" fill="${c[1]}" opacity=".45"/>
+</svg>`;
+}
+
+function svgParrot(c) {
+  const id = 'pa' + (++uid);
+  const c2 = pick(neonPalette);
+  return `<svg viewBox="0 0 110 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="50%" stop-color="${c2[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <ellipse cx="55" cy="50" rx="25" ry="20" fill="url(#${id}g)" opacity=".8"/>
+  <!-- head -->
+  <circle cx="82" cy="35" r="13" fill="${c[0]}" opacity=".85"/>
+  <!-- crest -->
+  <path d="M82,22 Q78,8 88,14 Q94,6 90,18" fill="${c2[0]}" opacity=".7">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 82 22;-6 82 22;0 82 22;4 82 22;0 82 22" dur="2s" repeatCount="indefinite"/>
+  </path>
+  <!-- beak -->
+  <path d="M94,34 Q105,30 100,38 Q104,40 94,40 Z" fill="#ffe040" opacity=".9"/>
+  <!-- eye -->
+  <circle cx="87" cy="32" r="3" fill="#fff" opacity=".9"/>
+  <circle cx="88" cy="32" r="1.5" fill="#111"/>
+  <!-- wing -->
+  <path d="M42,38 Q30,15 62,28" fill="${c2[0]}" opacity=".6">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 52 44;-20 52 44;0 52 44" dur="0.4s" repeatCount="indefinite"/>
+  </path>
+  <!-- tail feathers -->
+  <path d="M30,55 Q8,48 12,62" fill="${c[0]}" opacity=".5"/>
+  <path d="M30,58 Q6,58 10,72" fill="${c2[0]}" opacity=".45"/>
+  <path d="M30,52 Q10,40 14,55" fill="${c[1]}" opacity=".4"/>
+</svg>`;
+}
+
+function svgButterfly(c) {
+  const id = 'bt' + (++uid);
+  const c2 = pick(neonPalette);
+  return `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="${id}g1"><stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/></radialGradient>
+    <radialGradient id="${id}g2"><stop offset="0%" stop-color="${c2[0]}"/><stop offset="100%" stop-color="${c2[1]}"/></radialGradient>
+  </defs>
+  <!-- body -->
+  <ellipse cx="60" cy="50" rx="4" ry="22" fill="${c[1]}" opacity=".8"/>
+  <!-- antennae -->
+  <path d="M58,30 Q50,14 44,10" fill="none" stroke="${c[0]}" stroke-width="1.5" opacity=".6"/>
+  <circle cx="44" cy="10" r="2" fill="${c[0]}" opacity=".6"/>
+  <path d="M62,30 Q70,14 76,10" fill="none" stroke="${c[0]}" stroke-width="1.5" opacity=".6"/>
+  <circle cx="76" cy="10" r="2" fill="${c[0]}" opacity=".6"/>
+  <!-- left wings -->
+  <g>
+    <ellipse cx="38" cy="36" rx="24" ry="18" fill="url(#${id}g1)" opacity=".55"/>
+    <ellipse cx="36" cy="62" rx="18" ry="14" fill="url(#${id}g2)" opacity=".5"/>
+    <!-- wing spots -->
+    <circle cx="34" cy="36" r="6" fill="#fff" opacity=".2"/>
+    <animateTransform attributeName="transform" type="scale"
+      values="1 1;0.6 1;1 1" dur="0.8s" repeatCount="indefinite"
+      additive="sum" origin="60 50"/>
+    <animateTransform attributeName="transform" type="translate"
+      values="0,0;6,0;0,0" dur="0.8s" repeatCount="indefinite"/>
+  </g>
+  <!-- right wings -->
+  <g>
+    <ellipse cx="82" cy="36" rx="24" ry="18" fill="url(#${id}g1)" opacity=".55"/>
+    <ellipse cx="84" cy="62" rx="18" ry="14" fill="url(#${id}g2)" opacity=".5"/>
+    <circle cx="86" cy="36" r="6" fill="#fff" opacity=".2"/>
+    <animateTransform attributeName="transform" type="scale"
+      values="1 1;0.6 1;1 1" dur="0.8s" repeatCount="indefinite"
+      additive="sum"/>
+    <animateTransform attributeName="transform" type="translate"
+      values="0,0;-6,0;0,0" dur="0.8s" repeatCount="indefinite"/>
+  </g>
+</svg>`;
+}
+
+function svgWhale(c) {
+  const id = 'wh' + (++uid);
+  return `<svg viewBox="0 0 160 90" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <path d="M30,45 Q30,18 70,16 Q120,14 135,40 Q140,55 120,62 Q80,72 40,65 Q30,62 30,45 Z"
+    fill="url(#${id}g)" opacity=".75"/>
+  <!-- belly -->
+  <path d="M50,58 Q80,68 115,58" fill="#fff" opacity=".08"/>
+  <!-- tail -->
+  <g>
+    <path d="M30,45 Q14,28 6,18 Q2,14 8,22 Q10,26 18,38" fill="${c[0]}" opacity=".6"/>
+    <path d="M30,45 Q14,60 6,72 Q2,78 8,68 Q10,64 18,52" fill="${c[0]}" opacity=".6"/>
+    <animateTransform attributeName="transform" type="rotate"
+      values="-6 30 45;6 30 45;-6 30 45" dur="1.5s" repeatCount="indefinite"/>
+  </g>
+  <!-- eye -->
+  <circle cx="118" cy="38" r="4" fill="#fff" opacity=".9"/>
+  <circle cx="120" cy="38" r="2" fill="#111"/>
+  <!-- mouth line -->
+  <path d="M130,48 Q138,52 132,56" fill="none" stroke="${c[1]}" stroke-width="1.5" opacity=".4"/>
+  <!-- spout -->
+  <g opacity=".4">
+    <path d="M90,16 Q88,6 84,0" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round">
+      <animate attributeName="opacity" values=".4;.1;.4" dur="3s" repeatCount="indefinite"/>
+    </path>
+    <path d="M90,16 Q92,5 96,0" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round">
+      <animate attributeName="opacity" values=".4;.1;.4" dur="3s" repeatCount="indefinite"/>
+    </path>
+  </g>
+  <!-- flipper -->
+  <ellipse cx="90" cy="60" rx="14" ry="5" fill="${c[1]}" opacity=".4">
+    <animateTransform attributeName="transform" type="rotate"
+      values="8 90 60;-8 90 60;8 90 60" dur="2s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>`;
+}
+
+function svgDolphin(c) {
+  const id = 'dl' + (++uid);
+  return `<svg viewBox="0 0 140 80" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0%" stop-color="${c[1]}"/><stop offset="100%" stop-color="${c[0]}"/>
+  </linearGradient></defs>
+  <!-- body -->
+  <path d="M20,42 Q20,22 50,18 Q90,12 115,30 Q130,38 125,42 Q120,48 90,52 Q55,58 28,52 Q20,50 20,42 Z"
+    fill="url(#${id}g)" opacity=".8"/>
+  <!-- rostrum (beak) -->
+  <path d="M125,38 Q138,36 140,38 Q138,40 125,42" fill="${c[0]}" opacity=".7"/>
+  <!-- dorsal fin -->
+  <path d="M70,18 Q68,2 80,12" fill="${c[0]}" opacity=".65">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 75 18;-4 75 18;0 75 18" dur="1s" repeatCount="indefinite"/>
+  </path>
+  <!-- tail -->
+  <g>
+    <path d="M20,40 Q8,28 4,22" fill="${c[1]}" opacity=".6"/>
+    <path d="M20,44 Q8,54 4,60" fill="${c[1]}" opacity=".6"/>
+    <animateTransform attributeName="transform" type="rotate"
+      values="-8 20 42;8 20 42;-8 20 42" dur="0.8s" repeatCount="indefinite"/>
+  </g>
+  <!-- eye -->
+  <circle cx="112" cy="34" r="3.5" fill="#fff" opacity=".9"/>
+  <circle cx="113.5" cy="34" r="1.8" fill="#111"/>
+  <!-- belly -->
+  <path d="M40,48 Q70,54 105,46" fill="#fff" opacity=".06"/>
+  <!-- flipper -->
+  <ellipse cx="85" cy="50" rx="10" ry="4" fill="${c[1]}" opacity=".45">
+    <animateTransform attributeName="transform" type="rotate"
+      values="5 85 50;-10 85 50;5 85 50" dur="1.2s" repeatCount="indefinite"/>
+  </ellipse>
+</svg>`;
+}
+
+function svgTurtle(c) {
+  const id = 'tu' + (++uid);
+  return `<svg viewBox="0 0 120 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="${id}g">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </radialGradient></defs>
+  <!-- shell -->
+  <ellipse cx="55" cy="45" rx="30" ry="24" fill="url(#${id}g)" opacity=".75"/>
+  <!-- shell pattern -->
+  <path d="M55,21 L55,69" stroke="${c[1]}" stroke-width="1.5" opacity=".3"/>
+  <path d="M28,38 Q55,50 82,38" fill="none" stroke="${c[1]}" stroke-width="1.5" opacity=".25"/>
+  <path d="M30,52 Q55,42 80,52" fill="none" stroke="${c[1]}" stroke-width="1.5" opacity=".25"/>
+  <!-- head -->
+  <ellipse cx="92" cy="42" rx="10" ry="8" fill="${c[0]}" opacity=".7"/>
+  <circle cx="98" cy="39" r="2.5" fill="#fff" opacity=".9"/>
+  <circle cx="99" cy="39" r="1.3" fill="#111"/>
+  <!-- front flippers -->
+  <ellipse cx="80" cy="62" rx="14" ry="5" fill="${c[1]}" opacity=".5"
+    transform="rotate(-20 80 62)">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-20 80 62;-35 80 62;-20 80 62" dur="1.2s" repeatCount="indefinite"/>
+  </ellipse>
+  <ellipse cx="80" cy="28" rx="14" ry="5" fill="${c[1]}" opacity=".5"
+    transform="rotate(20 80 28)">
+    <animateTransform attributeName="transform" type="rotate"
+      values="20 80 28;35 80 28;20 80 28" dur="1.2s" repeatCount="indefinite"/>
+  </ellipse>
+  <!-- back flippers -->
+  <ellipse cx="30" cy="58" rx="10" ry="4" fill="${c[1]}" opacity=".4"
+    transform="rotate(-30 30 58)">
+    <animateTransform attributeName="transform" type="rotate"
+      values="-30 30 58;-15 30 58;-30 30 58" dur="1.5s" repeatCount="indefinite"/>
+  </ellipse>
+  <ellipse cx="30" cy="32" rx="10" ry="4" fill="${c[1]}" opacity=".4"
+    transform="rotate(30 30 32)">
+    <animateTransform attributeName="transform" type="rotate"
+      values="30 30 32;15 30 32;30 30 32" dur="1.5s" repeatCount="indefinite"/>
+  </ellipse>
+  <!-- tail -->
+  <polygon points="25,45 14,44 16,48" fill="${c[1]}" opacity=".4"/>
+</svg>`;
+}
+
+function svgMantaRay(c) {
+  const id = 'mr' + (++uid);
+  return `<svg viewBox="0 0 140 80" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="${id}g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </linearGradient></defs>
+  <!-- wings -->
+  <g>
+    <path d="M70,40 Q50,10 15,15 Q5,18 20,35 Q40,50 70,40 Z" fill="url(#${id}g)" opacity=".7">
+      <animate attributeName="d"
+        values="M70,40 Q50,10 15,15 Q5,18 20,35 Q40,50 70,40 Z;M70,40 Q50,18 15,22 Q5,24 20,38 Q40,48 70,40 Z;M70,40 Q50,10 15,15 Q5,18 20,35 Q40,50 70,40 Z"
+        dur="1.8s" repeatCount="indefinite"/>
+    </path>
+    <path d="M70,40 Q50,70 15,65 Q5,62 20,45 Q40,30 70,40 Z" fill="url(#${id}g)" opacity=".65">
+      <animate attributeName="d"
+        values="M70,40 Q50,70 15,65 Q5,62 20,45 Q40,30 70,40 Z;M70,40 Q50,62 15,58 Q5,56 20,42 Q40,32 70,40 Z;M70,40 Q50,70 15,65 Q5,62 20,45 Q40,30 70,40 Z"
+        dur="1.8s" repeatCount="indefinite"/>
+    </path>
+  </g>
+  <!-- body centre -->
+  <ellipse cx="85" cy="40" rx="22" ry="10" fill="${c[0]}" opacity=".6"/>
+  <!-- cephalic fins -->
+  <path d="M105,35 Q112,28 118,30" fill="${c[1]}" opacity=".6"/>
+  <path d="M105,45 Q112,52 118,50" fill="${c[1]}" opacity=".6"/>
+  <!-- tail -->
+  <path d="M20,40 Q10,38 4,36" fill="none" stroke="${c[1]}" stroke-width="2.5" opacity=".5" stroke-linecap="round">
+    <animate attributeName="d"
+      values="M20,40 Q10,38 4,36;M20,40 Q10,42 4,44;M20,40 Q10,38 4,36"
+      dur="1.5s" repeatCount="indefinite"/>
+  </path>
+  <!-- eyes -->
+  <circle cx="108" cy="37" r="2" fill="#fff" opacity=".8"/>
+  <circle cx="108" cy="43" r="2" fill="#fff" opacity=".8"/>
+</svg>`;
+}
+
+function svgStarfish(c) {
+  const id = 'sf' + (++uid);
+  const pts = [];
+  for (let i = 0; i < 5; i++) {
+    const aOuter = (i * 72 - 90) * Math.PI / 180;
+    const aInner = ((i * 72 + 36) - 90) * Math.PI / 180;
+    pts.push(`${50 + Math.cos(aOuter)*35},${50 + Math.sin(aOuter)*35}`);
+    pts.push(`${50 + Math.cos(aInner)*14},${50 + Math.sin(aInner)*14}`);
+  }
+  return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <defs><radialGradient id="${id}g">
+    <stop offset="0%" stop-color="${c[0]}"/><stop offset="100%" stop-color="${c[1]}"/>
+  </radialGradient></defs>
+  <polygon points="${pts.join(' ')}" fill="url(#${id}g)" opacity=".65">
+    <animateTransform attributeName="transform" type="rotate"
+      values="0 50 50;360 50 50" dur="12s" repeatCount="indefinite"/>
+  </polygon>
+  <circle cx="50" cy="50" r="6" fill="${c[0]}" opacity=".3"/>
+  <!-- dots on arms -->
+  ${[0,1,2,3,4].map(i => {
+    const a = (i * 72 - 90) * Math.PI / 180;
+    return `<circle cx="${50+Math.cos(a)*22}" cy="${50+Math.sin(a)*22}" r="2.5" fill="#fff" opacity=".2">
+      <animateTransform attributeName="transform" type="rotate" values="0 50 50;360 50 50" dur="12s" repeatCount="indefinite"/>
+    </circle>`;
+  }).join('')}
+</svg>`;
+}
+
+/* ════════════════════════════════════════════
+   Creature registry & factory
+   ════════════════════════════════════════════ */
+const creatureTypes = [
+  { fn: svgTropicalFish, w: 120, h: 80  },
+  { fn: svgAngelfish,    w: 100, h: 120 },
+  { fn: svgPufferfish,   w: 100, h: 100 },
+  { fn: svgJellyfish,    w: 100, h: 130 },
+  { fn: svgOctopus,      w: 120, h: 120 },
+  { fn: svgSeahorse,     w: 70,  h: 130 },
+  { fn: svgBird,         w: 120, h: 80  },
+  { fn: svgHummingbird,  w: 110, h: 70  },
+  { fn: svgFlamingo,     w: 90,  h: 140 },
+  { fn: svgParrot,       w: 110, h: 100 },
+  { fn: svgButterfly,    w: 120, h: 100 },
+  { fn: svgWhale,        w: 160, h: 90  },
+  { fn: svgDolphin,      w: 140, h: 80  },
+  { fn: svgTurtle,       w: 120, h: 100 },
+  { fn: svgMantaRay,     w: 140, h: 80  },
+  { fn: svgStarfish,     w: 100, h: 100 },
+];
+
+/* ════════════════════════════════════════════
+   3. Floating creatures (ocean drift)
+   ════════════════════════════════════════════ */
+const shapesLayer = document.getElementById('shapes-layer');
+const CREATURE_COUNT = 22;
+const shapes = [];
+
+function initShape(s, initial) {
+  const creature = pick(creatureTypes);
+  const scaleFactor = rand(.5, 1.4);
+  const w = Math.round(creature.w * scaleFactor);
+  const h = Math.round(creature.h * scaleFactor);
+  const color = neonColor();
+  const speed = rand(.3, 1.2);
+  const yBase = rand(h, H() - h);
+  const sinAmp = rand(15, 60);
+  const sinFreq = rand(.0008, .003);
+  const opacity = rand(.35, .85);
+  const pulseSpeed = rand(.001, .004);
+
+  Object.assign(s, {
+    w, h, speed, yBase, sinAmp, sinFreq, opacity, pulseSpeed,
+    x: initial ? rand(-w, W()) : -w - rand(0, 150),
+    born: performance.now() + (initial ? rand(0, 3000) : 0),
+    svgHTML: creature.fn(color),
+  });
+
+  if (!s.el) {
+    s.el = document.createElement('div');
+    s.el.className = 'shape';
+    shapesLayer.appendChild(s.el);
+  }
+  s.el.style.width = w + 'px';
+  s.el.style.height = h + 'px';
+  s.el.style.color = color[0]; // for drop-shadow currentColor
+  s.el.innerHTML = s.svgHTML;
+}
+
+for (let i = 0; i < CREATURE_COUNT; i++) {
+  const s = {};
+  initShape(s, true);
+  shapes.push(s);
+}
+
+function updateShapes(t) {
+  shapes.forEach(s => {
+    s.x += s.speed;
+    if (s.x > W() + s.w) {
+      initShape(s, false);
+      return;
+    }
+    const yOff = Math.sin(t * s.sinFreq + s.born) * s.sinAmp;
+    const pulse = 1 + Math.sin(t * s.pulseSpeed) * .06;
+    const y = s.yBase + yOff;
+    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) scale(${pulse})`;
+    s.el.style.opacity = s.opacity;
+  });
+}
+
+/* ════════════════════════════════════════════
+   4. Floating Ü-words
+   ════════════════════════════════════════════ */
+const wordsLayer = document.getElementById('words-layer');
+const UE_WORDS = [
+  'Überglücklich','Überschwänglich','Überraschung','Überflieger',
+  'Übermut','Überragend','Überwältigend','Üppig','Über den Wolken',
+  'Überdurchschnittlich','Überirdisch','Überlegen','Übersinnlich',
+  'Überschäumend','Übernatürlich','Überdosis Freude','Überzeugend',
+  'Überaus','Überlicht','Übertreffen'
+];
+let lastWordTime = 0;
+const WORD_INTERVAL = 1800;
+
+function spawnWord(t) {
+  const el = document.createElement('div');
+  el.className = 'floating-word';
+  el.textContent = pick(UE_WORDS);
+  const fs = rand(14, 36);
+  el.style.fontSize = fs + 'px';
+  el.style.left = rand(5, 85) + '%';
+  el.style.top  = rand(8, 88) + '%';
+  el.style.transform += ` rotate(${rand(-8,8)}deg)`;
+  wordsLayer.appendChild(el);
+  setTimeout(() => { el.remove(); }, 4600);
+}
+
+/* ════════════════════════════════════════════
+   5. Mouse / touch tracking + ripple
+   ════════════════════════════════════════════ */
+let lastRipple = 0;
+
+function onPointer(x, y, t) {
+  targetX = x;
+  targetY = y;
+  if (t - lastRipple > 120) {
+    lastRipple = t;
+    spawnRipple(x, y);
+  }
+}
+
+document.addEventListener('mousemove', e => {
+  onPointer(e.clientX, e.clientY, performance.now());
+});
+document.addEventListener('touchmove', e => {
+  const touch = e.touches[0];
+  onPointer(touch.clientX, touch.clientY, performance.now());
+}, { passive: true });
+document.addEventListener('touchstart', e => {
+  const touch = e.touches[0];
+  onPointer(touch.clientX, touch.clientY, performance.now());
+}, { passive: true });
+
+function spawnRipple(x, y) {
+  const size = rand(60, 140);
+  const el = document.createElement('div');
+  el.className = 'ripple';
+  el.style.width = size + 'px';
+  el.style.height = size + 'px';
+  el.style.left = (x - size / 2) + 'px';
+  el.style.top  = (y - size / 2) + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 950);
+}
+
+/* ════════════════════════════════════════════
+   6. Autonomous gradient drift (no mouse / touch)
+   ════════════════════════════════════════════ */
+let hasInteracted = false;
+document.addEventListener('mousemove', () => { hasInteracted = true; }, { once: true });
+document.addEventListener('touchstart', () => { hasInteracted = true; }, { once: true });
+
+function autoDrift(t) {
+  if (hasInteracted) return;
+  targetX = W() * .5 + Math.sin(t * .0004) * W() * .25;
+  targetY = H() * .5 + Math.cos(t * .0003) * H() * .2;
+}
+
+/* ════════════════════════════════════════════
+   7. Main loop
+   ════════════════════════════════════════════ */
+function tick(t) {
+  autoDrift(t);
+  mouseX = lerp(mouseX, targetX, .04);
+  mouseY = lerp(mouseY, targetY, .04);
+  hueShift = (t * .012) % 360;
+  drawGradient(t);
+  updateShapes(t);
+  if (t - lastWordTime > WORD_INTERVAL) {
+    lastWordTime = t;
+    spawnWord(t);
+  }
+  requestAnimationFrame(tick);
+}
+
+requestAnimationFrame(tick);
+
+/* ════════════════════════════════════════════
+   8. Resize handler
+   ════════════════════════════════════════════ */
+window.addEventListener('resize', () => {
+  shapes.forEach(s => {
+    if (s.yBase > H() - s.h) s.yBase = H() - s.h - 10;
+  });
+});
+
+})();
+</script>
+</body>
+</html>

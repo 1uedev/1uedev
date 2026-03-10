@@ -153,6 +153,15 @@ html,body{
   0%{transform:scale(0) translateZ(0);opacity:.7}
   100%{transform:scale(1) translateZ(0);opacity:0}
 }
+
+/* ── click-burst particle ── */
+.click-particle{
+  position:fixed;
+  pointer-events:none;
+  z-index:5;
+  will-change:transform,opacity,left,top;
+  transform-origin:center center;
+}
 </style>
 </head>
 <body>
@@ -176,6 +185,12 @@ html,body{
    0. Helpers
    ════════════════════════════════════════════ */
 const lerp = (a,b,t) => a + (b - a) * t;
+const lerpAngle = (a, b, t) => {
+  let diff = b - a;
+  while (diff >  180) diff -= 360;
+  while (diff < -180) diff += 360;
+  return a + diff * t;
+};
 const rand = (lo,hi) => Math.random() * (hi - lo) + lo;
 const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 const W = () => window.innerWidth;
@@ -845,6 +860,9 @@ function initShape(s, initial) {
     x: initial ? rand(-w, W()) : -w - rand(0, 150),
     born: performance.now() + (initial ? rand(0, 3000) : 0),
     svgHTML: creature.fn(color),
+    tilt: s.tilt || 0,
+    facing: s.facing || 1,
+    facingLerp: s.facingLerp !== undefined ? s.facingLerp : 1,
   });
 
   if (!s.el) {
@@ -864,12 +882,95 @@ for (let i = 0; i < CREATURE_COUNT; i++) {
   shapes.push(s);
 }
 
+/* ════════════════════════════════════════════
+   Click-bait particle system
+   ════════════════════════════════════════════ */
+const clickParticles = [];
+let attractionTarget = null;
+let attractionUntil = 0;
+const ATTRACTION_DURATION = 3000;
+
+const PARTICLE_COLORS = [
+  '#ff2daa','#c840ff','#40a0ff','#2dffb0',
+  '#ffe040','#ff8030','#ff4060','#40ffe0'
+];
+
+function spawnClickParticles(x, y) {
+  const COUNT = 14;
+  for (let i = 0; i < COUNT; i++) {
+    const angle = (i / COUNT) * Math.PI * 2 + rand(-0.25, 0.25);
+    const speed = rand(1.8, 5.0);
+    const size = rand(4, 10);
+    const color = pick(PARTICLE_COLORS);
+    // Alternate between circles, squares and small diamonds
+    const shapes = ['50%', '2px', '0%'];
+    const borderRadius = pick(shapes);
+    const rotation = rand(0, 360);
+    const el = document.createElement('div');
+    el.className = 'click-particle';
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    el.style.borderRadius = borderRadius;
+    el.style.background = color;
+    el.style.boxShadow = `0 0 ${size * 1.4}px ${color}, 0 0 ${size * 2.5}px ${color}55`;
+    el.style.left = x + 'px';
+    el.style.top = y + 'px';
+    el.style.transform = `translate(-50%,-50%) rotate(${rotation}deg)`;
+    document.body.appendChild(el);
+
+    clickParticles.push({
+      el,
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      rotation,
+      born: performance.now(),
+      duration: ATTRACTION_DURATION + rand(-200, 300),
+    });
+  }
+}
+
+function updateParticles(t) {
+  for (let i = clickParticles.length - 1; i >= 0; i--) {
+    const p = clickParticles[i];
+    const elapsed = t - p.born;
+    const progress = elapsed / p.duration;
+    if (progress >= 1) {
+      p.el.remove();
+      clickParticles.splice(i, 1);
+      continue;
+    }
+    // Drag
+    p.vx *= 0.93;
+    p.vy *= 0.93;
+    // Gentle float after burst settles
+    p.vy += Math.sin(t * 0.003 + p.born) * 0.02;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rotation += p.vx * 2;
+    // Full opacity until 70%, then fade
+    const opacity = progress < 0.7 ? 1 : 1 - (progress - 0.7) / 0.3;
+    p.el.style.left = p.x + 'px';
+    p.el.style.top = p.y + 'px';
+    p.el.style.opacity = opacity;
+    p.el.style.transform = `translate(-50%,-50%) rotate(${p.rotation}deg)`;
+  }
+}
+
 // click / tap detection – listener on document, match against shapes
 document.addEventListener('click', e => {
   const shapeEl = e.target.closest('.shape');
-  if (!shapeEl) return;
-  const s = shapes.find(s => s.el === shapeEl);
-  if (s) scareCreature(s);
+  if (shapeEl) {
+    const s = shapes.find(s => s.el === shapeEl);
+    if (s) scareCreature(s);
+    return;
+  }
+  // Empty-space click: spawn particles and attract all creatures
+  const x = e.clientX;
+  const y = e.clientY;
+  spawnClickParticles(x, y);
+  attractionTarget = { x, y };
+  attractionUntil = performance.now() + ATTRACTION_DURATION;
 });
 
 function scareCreature(s) {
@@ -887,14 +988,43 @@ function scareCreature(s) {
 }
 
 function updateShapes(t) {
+  const isAttracted = attractionTarget && t < attractionUntil;
+
   shapes.forEach(s => {
-    // scared vertical drift
+    // scared vertical drift (applies regardless)
     if (s.scared) {
       s.yBase += s.scareDir;
-      s.scareDir *= .97; // dampen vertical scatter
+      s.scareDir *= .97;
     }
 
-    s.x += s.speed;
+    if (!s.scared && isAttracted) {
+      // Move toward the attraction target (click point / particles)
+      const cx = s.x + s.w / 2;
+      const cy = s.yBase + s.h / 2;
+      const dx = attractionTarget.x - cx;
+      const dy = attractionTarget.y - cy;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 10) {
+        const moveSpeed = Math.min(1.6, dist * 0.018);
+        s.x     += (dx / dist) * moveSpeed;
+        s.yBase += (dy / dist) * moveSpeed;
+        // Flip to face movement direction
+        s.facing = dx >= 0 ? 1 : -1;
+        // Tilt up/down based on vertical component, clamped to avoid extremes
+        const rawTilt = Math.atan2(dy, Math.abs(dx)) * 180 / Math.PI;
+        s.tilt = lerp(s.tilt, Math.max(-40, Math.min(40, rawTilt)), 0.07);
+      }
+      // Slow rightward drift still applies so they don't fully freeze
+      s.x += s.speed * 0.15;
+    } else {
+      s.x += s.speed;
+      // Level out and face right again
+      s.tilt   = lerp(s.tilt, 0, 0.05);
+      s.facing = 1;
+    }
+    // Smooth facing flip (lerps through 0 → natural 2D turn effect)
+    s.facingLerp = lerp(s.facingLerp, s.facing, 0.08);
+
     if (s.x > W() + s.w || s.x < -s.w * 2) {
       s.scared = false;
       s.el.classList.remove('scared');
@@ -904,7 +1034,7 @@ function updateShapes(t) {
     const yOff = s.scared ? 0 : Math.sin(t * s.sinFreq + s.born) * s.sinAmp;
     const scale = s.scared ? s.scareScale : 1 + Math.sin(t * s.pulseSpeed) * .06;
     const y = s.yBase + yOff;
-    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) scale(${scale})`;
+    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) rotate(${s.tilt.toFixed(1)}deg) scaleX(${s.facingLerp.toFixed(3)}) scale(${scale})`;
     s.el.style.opacity = s.scared ? 1 : s.opacity;
   });
 }
@@ -918,7 +1048,7 @@ const UE_WORDS = [
   'Übermut','Überragend','Überwältigend','Üppig','Über den Wolken',
   'Überdurchschnittlich','Überirdisch','Überlegen','Übersinnlich',
   'Überschäumend','Übernatürlich','Überdosis Freude','Überzeugend',
-  'Überaus','Überlicht','Übertreffen'
+  'Überaus','Überlicht','Übertreffen','übelst gut'
 ];
 let lastWordTime = 0;
 const WORD_INTERVAL = 1800;
@@ -997,6 +1127,7 @@ function tick(t) {
   hueShift = (t * .012) % 360;
   drawGradient(t);
   updateShapes(t);
+  updateParticles(t);
   if (t - lastWordTime > WORD_INTERVAL) {
     lastWordTime = t;
     spawnWord(t);

@@ -1034,7 +1034,7 @@ function updateShapes(t) {
     const yOff = s.scared ? 0 : Math.sin(t * s.sinFreq + s.born) * s.sinAmp;
     const scale = s.scared ? s.scareScale : 1 + Math.sin(t * s.pulseSpeed) * .06;
     const y = s.yBase + yOff;
-    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) rotate(${s.tilt.toFixed(1)}deg) scaleX(${s.facingLerp.toFixed(3)}) scale(${scale})`;
+    s.el.style.transform = `translate3d(${s.x}px,${y}px,0) rotate(${(s.tilt * s.facing).toFixed(1)}deg) scaleX(${s.facingLerp.toFixed(3)}) scale(${scale})`;
     s.el.style.opacity = s.scared ? 1 : s.opacity;
   });
 }

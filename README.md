@@ -1,6 +1,8 @@
 ## Hi there 👋
 
 This is just the repo from 1ü.dev website, which is a sole placeholder site with some nice funny animations
+and PM-Tool a holistic System to cover the product managmetn process
+and some other tools
 <!--
 **1uedev/1uedev** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 
